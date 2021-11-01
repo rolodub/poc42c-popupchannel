@@ -79,7 +79,7 @@ export class PopupchannelStack extends cdk.Stack {
   const WebapiLambda = new lambda.Function(this, 'WebapiLambda',{
     runtime:lambda.Runtime.PYTHON_3_7,
     code: lambda.Code.fromAsset("resources"),
-    handler: 'test_api.handler',
+    handler: 'popup_api.handler',
     environment:{
       DYNAMODB_TABLE_NAME: PopupDynamoTable.tableName!,
     }
