@@ -22,7 +22,7 @@ export class PopupchannelStack extends cdk.Stack {
         attributeType:'S'
       },
       {
-        attributeName:'name',
+        attributeName:'item_name',
         attributeType:'S'
       },
       {
@@ -62,7 +62,7 @@ export class PopupchannelStack extends cdk.Stack {
       indexName:'name_date_index',
       keySchema:[
         {
-          attributeName:'name',
+          attributeName:'item_name',
           keyType:'HASH'
         },
         {

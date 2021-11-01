@@ -59,62 +59,33 @@ def handler(event, context):
         write_log("ERROR", "Environment Variable DYNAMODB_TABLE_NAME is not set")
         status_code = 200
         message['state'] = 'broke'
-    CHANNEL_PLAYBACK_URL = os.environ.get('CHANNEL_PLAYBACK_URL')
-    REC_BUCKET_NAME = os.environ.get('REC_BUCKET_NAME')
     message = {
         'state':'fail'
     }
-    CHANNEL_INGEST_URL = os.environ.get('CHANNEL_INGEST_URL')
-    CHANNEL_STREAMKEY = os.environ.get('CHANNEL_STREAMKEY')
-    CHANNEL_ARN = os.environ.get('CHANNEL_ARN')
 
-    if event['path'] == '/channelspecs':
-        print('request: {}'.format(json.dumps(event)))
-        message['playback_url'] = CHANNEL_PLAYBACK_URL
-        message['ingest_url'] = CHANNEL_INGEST_URL
-        message['streamkey'] = CHANNEL_STREAMKEY
-        status_code = 200
-        message['state'] = 'success'
-        
-    elif event['path'] == '/item-put':
-        try:
-            if 'body' in event:
-                response = json.loads(event['body'])
-                if 'item_type' in response: 
-                    if response['item_type'] == 'answer': 
-                        table = DYNAMO_RESOURCE.Table(DYNAMODB_TABLE_NAME)
-                        write_log("INFO",table)
-                        item = {
-                            "item_id": str(response['item_id']),
-                            "item_type": str(response['item_type']), 
-                            "response": str(response['response']),
-                            "item_creation_date": int(time.time()),
-                            "timestamp_ttl": int(time.time()) + 3600 # 1hr
-                            }
-                        d_response = table.put_item(Item=item)
-                        write_log("INFO", "DynamoDB Succesful: {}".format(d_response))
-                        status_code = 200
-                        message['state'] = 'success'
-                else:
-                    write_log("WARNING", "type does not exist in response, doing nothing")
-        except:
-            status_code = 200
-            message['state'] = 'broke'
+    if event['path'] == '/item-put':
+        if event['httpMethod'] == 'POST'
+            try:
+                if 'body' in event:
+                    response = json.loads(event['body'])
+                    if 'item_type' in response: 
+                        if response['item_type'] == 'answer': 
+                            table = DYNAMO_RESOURCE.Table(DYNAMODB_TABLE_NAME)
+                            write_log("INFO",table)
+                            item = {
+                                "item_id": str(response['item_id']),
+                                "item_type": str(response['item_type']), 
+                                "item_name": str(response['item_name']),
+                                "item_creation_date": int(time.time()),
+                                "timestamp_ttl": int(time.time()) + 3600 # 1hr
+                                }
+                            d_response = table.put_item(Item=item)
+                            write_log("INFO", "DynamoDB Succesful: {}".format(d_response))
+                            status_code = 200
+                            message['state'] = 'success'
+                    else:
+                        write_log("WARNING", "type does not exist in response, doing nothing")
+            except:
+                status_code = 200
+                message['state'] = 'broke'
 
-   ## GET - items by types
-    elif event['path'] == '/type-get':
-        response = json.loads(event['body'])
-        item_type = response['item_type']
-        table = DYNAMO_RESOURCE.Table(DYNAMODB_TABLE_NAME)
-        d_response = table.query(
-            KeyConditionExpression=Key('item_type').eq(item_type),
-            ScanIndexForward=False,
-            Limit=5,
-            IndexName="type_date_index",
-        )
-        pprint(d_response['Items'])
-        message['items'] = {}
-        for item in d_response['Items']:
-            message['items'][item['item_id']] = item['response']
-        status_code = 200
-        message['state'] = 'success'
