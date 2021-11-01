@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-
-const cdk = require('@aws-cdk/core');
-const { PopupchannelStack } = require('../lib/popupchannel-stack');
+import 'source-map-support/register';
+import * as cdk from '@aws-cdk/core';
+import { PopupchannelStack } from '../lib/popupchannel-stack';
 
 const app = new cdk.App();
 new PopupchannelStack(app, 'PopupchannelStack', {
