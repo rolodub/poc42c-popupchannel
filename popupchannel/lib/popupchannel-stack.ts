@@ -3,14 +3,39 @@ import * as dynamodb from '@aws-cdk/aws-dynamodb';
 import * as iam from '@aws-cdk/aws-iam';
 import * as apigateway from '@aws-cdk/aws-apigateway';
 import * as lambda from '@aws-cdk/aws-lambda';
+import * as s3 from '@aws-cdk/aws-s3';
+import * as s3n from '@aws-cdk/aws-s3-notifications';
 
 export class PopupchannelStack extends cdk.Stack {
   constructor(scope: cdk.Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
-
+    //bucket stock
+    const stock_bucket = new s3.Bucket(this, "PopupChannelStockBucket",{
+      // 👇 Setting up CORS
+      cors: [
+        {
+          allowedMethods: [
+            s3.HttpMethods.GET,
+            s3.HttpMethods.POST,
+            s3.HttpMethods.PUT,
+          ],
+          allowedOrigins: ['*'],
+          allowedHeaders: ['*'],
+        },
+      ],
+  });
+  stock_bucket.addToResourcePolicy(
+  new iam.PolicyStatement({
+  sid: 'PublicReadForGetBucketObjects',
+  actions: [
+  's3:GetObject',
+  ],
+  resources: [stock_bucket.bucketArn,stock_bucket.arnForObjects('*')],
+  principals: [new iam.AnyPrincipal()],
+  }));
     // create Dynamodb table
   const PopupDynamoTable = new dynamodb.CfnTable(this, 'PopupDynamoTable', {
-    tableName:'ivs_items',
+    tableName:'popuptv_items',
 
     attributeDefinitions:[
       {
@@ -24,21 +49,14 @@ export class PopupchannelStack extends cdk.Stack {
       {
         attributeName:'item_name',
         attributeType:'S'
-      },
-      {
-        attributeName:'item_creation_date',
-        attributeType:'N'
-      },
+      }
     ],
     keySchema:[
       {
         attributeName:'item_id',
         keyType:'HASH'
       },
-      {
-        attributeName:'item_creation_date',
-        keyType:'RANGE'
-      },
+
     ],
     billingMode:'PAY_PER_REQUEST',
     globalSecondaryIndexes:[
@@ -48,11 +66,7 @@ export class PopupchannelStack extends cdk.Stack {
         {
           attributeName:'item_type',
           keyType:'HASH'
-        },
-        {
-          attributeName:'item_creation_date',
-          keyType:'RANGE'
-        },
+        }
       ],
       projection:{
         projectionType:'ALL'
@@ -64,11 +78,7 @@ export class PopupchannelStack extends cdk.Stack {
         {
           attributeName:'item_name',
           keyType:'HASH'
-        },
-        {
-          attributeName:'item_creation_date',
-          keyType:'RANGE'
-        },
+        }
       ],
       projection:{
         projectionType:'ALL'
@@ -82,6 +92,7 @@ export class PopupchannelStack extends cdk.Stack {
     handler: 'popup_api.handler',
     environment:{
       DYNAMODB_TABLE_NAME: PopupDynamoTable.tableName!,
+      STOCK_BUCKET:stock_bucket.bucketName,
     }
   });
 
@@ -103,8 +114,23 @@ export class PopupchannelStack extends cdk.Stack {
       ],
       allowMethods: ['OPTIONS', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
       allowCredentials: true,
-      allowOrigins: ['*'],
+      allowOrigins: ['https://web.postman.co'],
     },
   });
+  const myS3eventLambda = new lambda.Function(this, "MyStockS3EventProcessor", {
+    //code: new lambda.InlineCode("def main(event, context):\n\tprint(event)\n\treturn {'statusCode': 200, 'body': 'Hello, World'}"),
+    code: lambda.Code.fromAsset("resources"),
+    handler: "S3event_processor.handler",
+    runtime: lambda.Runtime.PYTHON_3_7,
+    environment:{
+      DYNAMODB_TABLE_NAME: PopupDynamoTable.tableName!,
+    }
+  });
+  myS3eventLambda.addToRolePolicy(dynamo_role);
+
+  stock_bucket.addEventNotification(s3.EventType.OBJECT_CREATED,
+    new s3n.LambdaDestination(myS3eventLambda),
+    //{suffix:'.mxf'},
+    )
   }
 }
