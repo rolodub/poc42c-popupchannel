@@ -33,6 +33,32 @@ export class PopupchannelStack extends cdk.Stack {
   resources: [stock_bucket.bucketArn,stock_bucket.arnForObjects('*')],
   principals: [new iam.AnyPrincipal()],
   }));
+      //bucket dest
+      const dest_bucket = new s3.Bucket(this, "PopupChannelConvetDestBucket",{
+        // 👇 Setting up CORS
+        cors: [
+          {
+            allowedMethods: [
+              s3.HttpMethods.GET,
+              s3.HttpMethods.POST,
+              s3.HttpMethods.PUT,
+            ],
+            allowedOrigins: ['*'],
+            allowedHeaders: ['*'],
+          },
+        ],
+    });
+    dest_bucket.addToResourcePolicy(
+      new iam.PolicyStatement({
+      sid: 'PublicReadForGetBucketObjects',
+      actions: [
+      's3:GetObject',
+      ],
+      resources: [dest_bucket.bucketArn,dest_bucket.arnForObjects('*')],
+      principals: [new iam.AnyPrincipal()],
+      }));
+
+
     // create Dynamodb table
   const PopupDynamoTable = new dynamodb.CfnTable(this, 'PopupDynamoTable', {
     tableName:'popuptv_items',
@@ -114,7 +140,7 @@ export class PopupchannelStack extends cdk.Stack {
       ],
       allowMethods: ['OPTIONS', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
       allowCredentials: true,
-      allowOrigins: ['https://web.postman.co'],
+      allowOrigins: ['*'],
     },
   });
   const myS3eventLambda = new lambda.Function(this, "MyStockS3EventProcessor", {
@@ -127,6 +153,29 @@ export class PopupchannelStack extends cdk.Stack {
     }
   });
   myS3eventLambda.addToRolePolicy(dynamo_role);
+
+    /**
+   * MediaConvert Service Role to grant Mediaconvert Access to the source and Destination Bucket,
+   * API invoke * is also required for the services.
+  */
+  const mediaconvertRole = new iam.Role(this, 'MediaConvertRole', {
+  assumedBy: new iam.ServicePrincipal('mediaconvert.amazonaws.com'),
+    });
+    const mediaconvertPolicy = new iam.Policy(this, 'MediaconvertPolicy', {
+        statements: [
+            new iam.PolicyStatement({
+                resources: [`${stock_bucket.bucketArn}/*`, `${dest_bucket.bucketArn}/*`],
+                actions: ['s3:GetObject', 's3:PutObject']
+            }),
+            new iam.PolicyStatement({
+                resources: [`arn:${cdk.Aws.PARTITION}:execute-api:${cdk.Aws.REGION}:${cdk.Aws.ACCOUNT_ID}:*`],
+                actions: ['execute-api:Invoke']
+            })
+        ]
+    });
+    mediaconvertPolicy.attachToRole(mediaconvertRole);
+
+
 
   stock_bucket.addEventNotification(s3.EventType.OBJECT_CREATED,
     new s3n.LambdaDestination(myS3eventLambda),

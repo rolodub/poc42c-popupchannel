@@ -42,10 +42,15 @@ def handler(event, context):
         'state':'fail'
     }
     if event['Records']:
+        item_type=''
         for record in event['Records']:
+            if str(record['s3']['object']['key']).startswith('stock_media'):
+                item_type='stock_media'
+            elif str(record['s3']['object']['key']).startswith('stock_install'):
+                item_type='stock_install'
             item = {
                     "item_id": str(record['s3']['object']['eTag']),
-                    "item_type": "media_base", 
+                    "item_type": item_type, 
                     "item_name": str(record['s3']['object']['key']),
                     "bucket": record['s3']['bucket'],
                     "item_creation_date": int(time.time()),

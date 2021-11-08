@@ -14,7 +14,7 @@ DYNAMO_CONFIG = Config(connect_timeout=0.250, read_timeout=0.250, retries={'max_
 DYNAMO_RESOURCE = boto3.resource('dynamodb', config=DYNAMO_CONFIG)
 DYNAMODB_TABLE_NAME = 'not-set'
 #DYNAMO_INDEX = "requestor_id-timestamp_created-index"
-
+s3_client = boto3.client('s3')
 DEBUG_LEVEL = "INFO"
 
 def write_log(log_level, log_string):
@@ -50,8 +50,8 @@ def get_items(event,item_type,table):
     pprint(DYNAMODB_TABLE_NAME)
     d_response = []
     if event['queryStringParameters']:
-        if event['queryStringParameters']['id']:
-            item_id = event['queryStringParameters']['id']
+        if event['queryStringParameters']['item_id']:
+            item_id = event['queryStringParameters']['item_id']
             d_response = table.query(KeyConditionExpression=Key('item_id').eq(item_id),ScanIndexForward=False)
     else:
         d_response = table.query(IndexName='type_date_index',KeyConditionExpression=Key('item_type').eq(item_type),ScanIndexForward=False)
@@ -71,7 +71,7 @@ def create_presigned_url(bucket_name, object_name, expiration=3600):
     """
 
     # Generate a presigned URL for the S3 object
-    s3_client = boto3.client('s3')
+    
     try:
         response = s3_client.generate_presigned_url('get_object',
                                                     Params={'Bucket': bucket_name,
@@ -95,10 +95,7 @@ def handler(event, context):
         write_log("ERROR", "Environment Variable DYNAMODB_TABLE_NAME is not set")
         status_code = 200
         message['state'] = 'broke'
-    message = {
-        'state':'fail'
-    }
-    
+
     if event['path'] == '/endpoints':
         if event['httpMethod'] == 'POST':
             try:
@@ -131,8 +128,8 @@ def handler(event, context):
             table = DYNAMO_RESOURCE.Table(DYNAMODB_TABLE_NAME)
             d_response = []
             if event['queryStringParameters']:
-                if event['queryStringParameters']['id']:
-                    item_id = event['queryStringParameters']['id']
+                if event['queryStringParameters']['item_id']:
+                    item_id = event['queryStringParameters']['item_id']
                     d_response = table.query(KeyConditionExpression=Key('item_id').eq(item_id),ScanIndexForward=False)
             else:
                 d_response = table.query(IndexName='type_date_index',KeyConditionExpression=Key('item_type').eq(item_type),ScanIndexForward=False)
@@ -140,12 +137,39 @@ def handler(event, context):
             message = replace_decimals(d_response)
             status_code = 200
             message['state'] = 'success'
+        elif event['httpMethod'] == 'DELETE':
+            item_type = "endpoint"
+            table = DYNAMO_RESOURCE.Table(DYNAMODB_TABLE_NAME)
+            d_response = []
+            if event['queryStringParameters']:
+                if event['queryStringParameters']['item_id']:
+                    item_id = event['queryStringParameters']['item_id']
+                    d_response = table.delete_item(Key={'item_id':item_id})
+            else:
+                message['state'] = 'not found'
+            status_code = 200
+            message['state'] = 'success'
+            
+    elif event['path'] == '/in_srt':
+        if event['httpMethod'] == 'GET':
+            pass
 
     elif event['path'] == '/stock_medias':
         if event['httpMethod'] == 'GET':
-            item_type = "media_base"
+            item_type = "stock_media"
             table = DYNAMO_RESOURCE.Table(DYNAMODB_TABLE_NAME)
             message = get_items(event,item_type,table)
+    elif event['path'] == '/copy_object_to_bucket':
+        copy_source = {
+            'Bucket': 'mybucket',
+            'Key': 'mykey'
+            }
+        bucket = s3_client.Bucket('otherbucket')
+        bucket.copy(copy_source, 'otherkey')
+
+   ## GET - ivs stream recordings
+    elif event['path'] == '/ivs-stream-recs':
+        pass
     return {
         'statusCode': 200,
         'body': json.dumps(message),
