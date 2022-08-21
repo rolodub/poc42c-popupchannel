@@ -9,8 +9,36 @@ import * as s3n from '@aws-cdk/aws-s3-notifications';
 export class PopupchannelStack extends cdk.Stack {
   constructor(scope: cdk.Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
-    //bucket stock
-    const stock_bucket = new s3.Bucket(this, "PopupChannelStockBucket",{
+
+
+    /**
+     * Logs bucket for S3 and CloudFront
+    */
+    const logsBucket = new s3.Bucket(this, 'Logs', {
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      publicReadAccess: false,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+    });
+    /**
+     * Get Cfn Resource for the logs bucket and add CFN_NAG rule
+     */
+    const cfnLogsBucket = logsBucket.node.findChild('Resource') as s3.CfnBucket;
+    cfnLogsBucket.cfnOptions.metadata = {
+      cfn_nag: {
+        rules_to_suppress: [{
+          id: 'W35',
+          reason: 'Logs bucket does not require logging configuration'
+        }, {
+          id: 'W51',
+          reason: 'Logs bucket is private and does not require a bucket policy'
+        }]
+      }
+    };
+
+    //bucket stock source
+    const stock_bucket = new s3.Bucket(this, "PopupChannelStockBucket", {
+      serverAccessLogsBucket: logsBucket,
+      serverAccessLogsPrefix: 'source-bucket-logs/',
       // 👇 Setting up CORS
       cors: [
         {
@@ -23,163 +51,165 @@ export class PopupchannelStack extends cdk.Stack {
           allowedHeaders: ['*'],
         },
       ],
-  });
-  stock_bucket.addToResourcePolicy(
-  new iam.PolicyStatement({
-  sid: 'PublicReadForGetBucketObjects',
-  actions: [
-  's3:GetObject',
-  ],
-  resources: [stock_bucket.bucketArn,stock_bucket.arnForObjects('*')],
-  principals: [new iam.AnyPrincipal()],
-  }));
-      //bucket dest
-      const dest_bucket = new s3.Bucket(this, "PopupChannelConvetDestBucket",{
-        // 👇 Setting up CORS
-        cors: [
-          {
-            allowedMethods: [
-              s3.HttpMethods.GET,
-              s3.HttpMethods.POST,
-              s3.HttpMethods.PUT,
-            ],
-            allowedOrigins: ['*'],
-            allowedHeaders: ['*'],
-          },
+    });
+    stock_bucket.addToResourcePolicy(
+      new iam.PolicyStatement({
+        sid: 'PublicReadForGetBucketObjects',
+        actions: [
+          's3:GetObject',
         ],
+        resources: [stock_bucket.bucketArn, stock_bucket.arnForObjects('*')],
+        principals: [new iam.AnyPrincipal()],
+      }));
+    //bucket dest
+    const dest_bucket = new s3.Bucket(this, "PopupChannelConvetDestBucket", {
+      serverAccessLogsBucket: logsBucket,
+      serverAccessLogsPrefix: 'source-bucket-logs/',
+      // 👇 Setting up CORS
+      cors: [
+        {
+          allowedMethods: [
+            s3.HttpMethods.GET,
+            s3.HttpMethods.POST,
+            s3.HttpMethods.PUT,
+          ],
+          allowedOrigins: ['*'],
+          allowedHeaders: ['*'],
+        },
+      ],
     });
     dest_bucket.addToResourcePolicy(
       new iam.PolicyStatement({
-      sid: 'PublicReadForGetBucketObjects',
-      actions: [
-      's3:GetObject',
-      ],
-      resources: [dest_bucket.bucketArn,dest_bucket.arnForObjects('*')],
-      principals: [new iam.AnyPrincipal()],
+        sid: 'PublicReadForGetBucketObjects',
+        actions: [
+          's3:GetObject',
+        ],
+        resources: [dest_bucket.bucketArn, dest_bucket.arnForObjects('*')],
+        principals: [new iam.AnyPrincipal()],
       }));
 
 
     // create Dynamodb table
-  const PopupDynamoTable = new dynamodb.CfnTable(this, 'PopupDynamoTable', {
-    tableName:'popuptv_items',
+    const PopupDynamoTable = new dynamodb.CfnTable(this, 'PopupDynamoTable', {
+      tableName: 'popuptv_items',
 
-    attributeDefinitions:[
-      {
-        attributeName:'item_id',
-        attributeType:'S'
-      },
-      {
-        attributeName:'item_type',
-        attributeType:'S'
-      },
-      {
-        attributeName:'item_name',
-        attributeType:'S'
-      }
-    ],
-    keySchema:[
-      {
-        attributeName:'item_id',
-        keyType:'HASH'
-      },
-
-    ],
-    billingMode:'PAY_PER_REQUEST',
-    globalSecondaryIndexes:[
-      {
-      indexName:'type_date_index',
-      keySchema:[
+      attributeDefinitions: [
         {
-          attributeName:'item_type',
-          keyType:'HASH'
+          attributeName: 'item_id',
+          attributeType: 'S'
+        },
+        {
+          attributeName: 'item_type',
+          attributeType: 'S'
+        },
+        {
+          attributeName: 'item_name',
+          attributeType: 'S'
         }
       ],
-      projection:{
-        projectionType:'ALL'
-      }
-    },
-    {
-      indexName:'name_date_index',
-      keySchema:[
+      keySchema: [
         {
-          attributeName:'item_name',
-          keyType:'HASH'
+          attributeName: 'item_id',
+          keyType: 'HASH'
+        },
+
+      ],
+      billingMode: 'PAY_PER_REQUEST',
+      globalSecondaryIndexes: [
+        {
+          indexName: 'type_date_index',
+          keySchema: [
+            {
+              attributeName: 'item_type',
+              keyType: 'HASH'
+            }
+          ],
+          projection: {
+            projectionType: 'ALL'
+          }
+        },
+        {
+          indexName: 'name_date_index',
+          keySchema: [
+            {
+              attributeName: 'item_name',
+              keyType: 'HASH'
+            }
+          ],
+          projection: {
+            projectionType: 'ALL'
+          }
         }
-      ],
-      projection:{
-        projectionType:'ALL'
+      ]
+    });
+    const WebapiLambda = new lambda.Function(this, 'WebapiLambda', {
+      runtime: lambda.Runtime.PYTHON_3_7,
+      code: lambda.Code.fromAsset("resources"),
+      handler: 'popup_api.handler',
+      environment: {
+        DYNAMODB_TABLE_NAME: PopupDynamoTable.tableName!,
+        STOCK_BUCKET: stock_bucket.bucketName,
       }
-    }
-    ]
-  });
-  const WebapiLambda = new lambda.Function(this, 'WebapiLambda',{
-    runtime:lambda.Runtime.PYTHON_3_7,
-    code: lambda.Code.fromAsset("resources"),
-    handler: 'popup_api.handler',
-    environment:{
-      DYNAMODB_TABLE_NAME: PopupDynamoTable.tableName!,
-      STOCK_BUCKET:stock_bucket.bucketName,
-    }
-  });
+    });
 
-  const dynamo_role = new iam.PolicyStatement({
-    resources: ['*'],
-    actions: ['dynamodb:PutItem','dynamodb:DeleteItem','dynamodb:GetItem','dynamodb:Scan','dynamodb:Query','dynamodb:UpdateItem','dynamodb:GetItem','dynamodb:Scan','dynamodb:Query','dynamodb:GetRecords','dynamodb:BatchGetItem'],
-  })
-  WebapiLambda.addToRolePolicy(dynamo_role);
+    const dynamo_role = new iam.PolicyStatement({
+      resources: ['*'],
+      actions: ['dynamodb:PutItem', 'dynamodb:DeleteItem', 'dynamodb:GetItem', 'dynamodb:Scan', 'dynamodb:Query', 'dynamodb:UpdateItem', 'dynamodb:GetItem', 'dynamodb:Scan', 'dynamodb:Query', 'dynamodb:GetRecords', 'dynamodb:BatchGetItem'],
+    })
+    WebapiLambda.addToRolePolicy(dynamo_role);
 
 
-  const api = new apigateway.LambdaRestApi(this, "widgets-api", {
-    handler:WebapiLambda,
-    defaultCorsPreflightOptions: {
-      allowHeaders: [
-        'Content-Type',
-        'X-Amz-Date',
-        'Authorization',
-        'X-Api-Key',
-      ],
-      allowMethods: ['OPTIONS', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-      allowCredentials: true,
-      allowOrigins: ['*'],
-    },
-  });
-  const myS3eventLambda = new lambda.Function(this, "MyStockS3EventProcessor", {
-    //code: new lambda.InlineCode("def main(event, context):\n\tprint(event)\n\treturn {'statusCode': 200, 'body': 'Hello, World'}"),
-    code: lambda.Code.fromAsset("resources"),
-    handler: "S3event_processor.handler",
-    runtime: lambda.Runtime.PYTHON_3_7,
-    environment:{
-      DYNAMODB_TABLE_NAME: PopupDynamoTable.tableName!,
-    }
-  });
-  myS3eventLambda.addToRolePolicy(dynamo_role);
+    const api = new apigateway.LambdaRestApi(this, "widgets-api", {
+      handler: WebapiLambda,
+      defaultCorsPreflightOptions: {
+        allowHeaders: [
+          'Content-Type',
+          'X-Amz-Date',
+          'Authorization',
+          'X-Api-Key',
+        ],
+        allowMethods: ['OPTIONS', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+        allowCredentials: true,
+        allowOrigins: ['*'],
+      },
+    });
+    const myS3eventLambda = new lambda.Function(this, "MyStockS3EventProcessor", {
+      //code: new lambda.InlineCode("def main(event, context):\n\tprint(event)\n\treturn {'statusCode': 200, 'body': 'Hello, World'}"),
+      code: lambda.Code.fromAsset("resources"),
+      handler: "S3event_processor.handler",
+      runtime: lambda.Runtime.PYTHON_3_7,
+      environment: {
+        DYNAMODB_TABLE_NAME: PopupDynamoTable.tableName!,
+      }
+    });
+    myS3eventLambda.addToRolePolicy(dynamo_role);
 
     /**
    * MediaConvert Service Role to grant Mediaconvert Access to the source and Destination Bucket,
    * API invoke * is also required for the services.
   */
-  const mediaconvertRole = new iam.Role(this, 'MediaConvertRole', {
-  assumedBy: new iam.ServicePrincipal('mediaconvert.amazonaws.com'),
+    const mediaconvertRole = new iam.Role(this, 'MediaConvertRole', {
+      assumedBy: new iam.ServicePrincipal('mediaconvert.amazonaws.com'),
     });
     const mediaconvertPolicy = new iam.Policy(this, 'MediaconvertPolicy', {
-        statements: [
-            new iam.PolicyStatement({
-                resources: [`${stock_bucket.bucketArn}/*`, `${dest_bucket.bucketArn}/*`],
-                actions: ['s3:GetObject', 's3:PutObject']
-            }),
-            new iam.PolicyStatement({
-                resources: [`arn:${cdk.Aws.PARTITION}:execute-api:${cdk.Aws.REGION}:${cdk.Aws.ACCOUNT_ID}:*`],
-                actions: ['execute-api:Invoke']
-            })
-        ]
+      statements: [
+        new iam.PolicyStatement({
+          resources: [`${stock_bucket.bucketArn}/*`, `${dest_bucket.bucketArn}/*`],
+          actions: ['s3:GetObject', 's3:PutObject']
+        }),
+        new iam.PolicyStatement({
+          resources: [`arn:${cdk.Aws.PARTITION}:execute-api:${cdk.Aws.REGION}:${cdk.Aws.ACCOUNT_ID}:*`],
+          actions: ['execute-api:Invoke']
+        })
+      ]
     });
     mediaconvertPolicy.attachToRole(mediaconvertRole);
 
 
 
-  stock_bucket.addEventNotification(s3.EventType.OBJECT_CREATED,
-    new s3n.LambdaDestination(myS3eventLambda),
-    //{suffix:'.mxf'},
+    stock_bucket.addEventNotification(s3.EventType.OBJECT_CREATED,
+      new s3n.LambdaDestination(myS3eventLambda),
+      //{suffix:'.mxf'},
     )
   }
 }
